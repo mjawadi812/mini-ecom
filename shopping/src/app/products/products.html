@@ -1,0 +1,22 @@
+<h2>Products</h2>
+
+<ng-template #loadingBlock>
+    <div>Loading...</div>
+</ng-template>
+
+<ng-template #noRecordsBlock>
+    <div>No Records Found</div>
+</ng-template>
+<div class="products">
+    <div *ngIf="products$ | async as products; else loadingBlock">
+        <div *ngIf="products.length ===0">
+                    No Records Found
+        </div>
+        <div *ngFor="let p of products" class="product-card">
+            <h3>{{p.name}}</h3>
+            <p>{{p.price | currency}}</p>
+            <p>{{p.description}}</p>
+            <button (click)="addToCart(p)">Add to Cart</button>
+        </div>
+    </div>
+</div>
