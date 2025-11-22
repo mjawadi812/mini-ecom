@@ -1,0 +1,15 @@
+# Dockerfile.backend
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install deps
+COPY mini-api/package*.json ./
+RUN npm ci --production
+
+# Copy source
+COPY mini-api/. .
+
+EXPOSE 8080
+
+CMD ["node", "server.js"]

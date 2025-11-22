@@ -1,0 +1,55 @@
+# Node modules
+shopping/node_modules/
+mini-api/node_modules/
+
+# Build outputs
+shopping/dist/
+shopping/.angular/
+mini-api/dist/
+mini-api/build/
+
+# Environment files
+shopping/.env
+shopping/.env.local
+shopping/.env.*.local
+mini-api/.env
+mini-api/.env.local
+mini-api/.env.*.local
+
+# Logs
+shopping/npm-debug.log*
+shopping/yarn-debug.log*
+shopping/yarn-error.log*
+mini-api/npm-debug.log*
+mini-api/yarn-debug.log*
+mini-api/yarn-error.log*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Docker volumes (if any)
+postgres_data/
+
+# Test coverage
+shopping/coverage/
+mini-api/coverage/
+shopping/.nyc_output/
+mini-api/.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Package manager locks (optional - some teams commit these)
+# shopping/package-lock.json
+# mini-api/package-lock.json

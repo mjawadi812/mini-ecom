@@ -1,0 +1,1 @@
+Angular placeholder project. Replace with actual Angular app.
