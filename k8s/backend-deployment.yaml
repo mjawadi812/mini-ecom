@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: ghcr.io/YOUR-USERNAME/mini-ecom-backend:latest
+        image: ghcr.io/mjawadi812/mini-ecom-backend:latest
         ports:
           - containerPort: 8080
         env:

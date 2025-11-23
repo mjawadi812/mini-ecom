@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: ghcr.io/YOUR-USERNAME/mini-ecom-frontend:latest
+        image: ghcr.io/mjawadi812/mini-ecom-frontend:latest
         ports:
           - containerPort: 80
