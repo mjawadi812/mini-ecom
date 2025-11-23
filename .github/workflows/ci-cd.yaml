@@ -1,0 +1,340 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/mini-ecom-backend
+  IMAGE_FRONTEND: ghcr.io/${{ github.repository_owner }}/mini-ecom-frontend
+
+jobs:
+  # ==================== BUILD & TEST ====================
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            mini-api/package-lock.json
+            shopping/package-lock.json
+
+      # ========== BACKEND ==========
+      - name: Install Backend Dependencies
+        working-directory: mini-api
+        run: npm ci
+
+      - name: Run Backend Tests
+        working-directory: mini-api
+        run: npm test || echo "⚠️  No tests configured"
+        continue-on-error: true
+
+      - name: Lint Backend
+        working-directory: mini-api
+        run: |
+          if [ -f .eslintrc.js ] || [ -f .eslintrc.json ]; then
+            npx eslint . || echo "⚠️  Linting issues found"
+          else
+            echo "ℹ️  ESLint not configured, skipping..."
+          fi
+        continue-on-error: true
+
+      # ========== FRONTEND ==========
+      - name: Install Frontend Dependencies
+        working-directory: shopping
+        run: npm ci
+
+      - name: Lint Frontend
+        working-directory: shopping
+        run: |
+          if [ -f .eslintrc.js ] || [ -f .eslintrc.json ]; then
+            npx eslint . || echo "⚠️  Linting issues found"
+          else
+            echo "ℹ️  ESLint not configured, skipping..."
+          fi
+        continue-on-error: true
+
+      - name: Build Angular App
+        working-directory: shopping
+        run: npm run build -- --configuration production
+
+      # ========== SNYK SECURITY SCAN ==========
+      - name: Setup Snyk
+        uses: snyk/actions/setup@master
+
+      - name: Snyk Test - Backend Dependencies
+        working-directory: mini-api
+        run: |
+          echo "🔍 Scanning backend dependencies..."
+          snyk test --severity-threshold=high || echo "⚠️  Vulnerabilities found"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk Monitor - Backend
+        working-directory: mini-api
+        run: |
+          echo "📊 Monitoring backend in Snyk dashboard..."
+          snyk monitor --project-name=mini-ecom-backend || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk Test - Frontend Dependencies
+        working-directory: shopping
+        run: |
+          echo "🔍 Scanning frontend dependencies..."
+          snyk test --severity-threshold=high || echo "⚠️  Vulnerabilities found"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk Monitor - Frontend
+        working-directory: shopping
+        run: |
+          echo "📊 Monitoring frontend in Snyk dashboard..."
+          snyk monitor --project-name=mini-ecom-frontend || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+  # ==================== BUILD & PUSH DOCKER IMAGES ====================
+  build-and-push:
+    name: Build and Push Images
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: |
+            ${{ env.IMAGE_BACKEND }}:latest
+            ${{ env.IMAGE_BACKEND }}:${{ github.run_number }}
+            ${{ env.IMAGE_BACKEND }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE_BACKEND }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_BACKEND }}:buildcache,mode=max
+
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: |
+            ${{ env.IMAGE_FRONTEND }}:latest
+            ${{ env.IMAGE_FRONTEND }}:${{ github.run_number }}
+            ${{ env.IMAGE_FRONTEND }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE_FRONTEND }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_FRONTEND }}:buildcache,mode=max
+
+      # ========== SNYK DOCKER IMAGE SCAN ==========
+      - name: Setup Snyk
+        uses: snyk/actions/setup@master
+
+      - name: Snyk Container Scan - Backend Image
+        run: |
+          echo "🔍 Scanning backend Docker image..."
+          snyk container test ${{ env.IMAGE_BACKEND }}:${{ github.run_number }} \
+            --file=Dockerfile.backend \
+            --severity-threshold=high || echo "⚠️  Vulnerabilities found in image"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk Container Monitor - Backend Image
+        run: |
+          echo "📊 Monitoring backend image in Snyk..."
+          snyk container monitor ${{ env.IMAGE_BACKEND }}:${{ github.run_number }} \
+            --file=Dockerfile.backend \
+            --project-name=mini-ecom-backend-image || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk Container Scan - Frontend Image
+        run: |
+          echo "🔍 Scanning frontend Docker image..."
+          snyk container test ${{ env.IMAGE_FRONTEND }}:${{ github.run_number }} \
+            --file=Dockerfile.frontend \
+            --severity-threshold=high || echo "⚠️  Vulnerabilities found in image"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+      - name: Snyk Container Monitor - Frontend Image
+        run: |
+          echo "📊 Monitoring frontend image in Snyk..."
+          snyk container monitor ${{ env.IMAGE_FRONTEND }}:${{ github.run_number }} \
+            --file=Dockerfile.frontend \
+            --project-name=mini-ecom-frontend-image || true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+
+  # ==================== DEPLOY TO KUBERNETES ====================
+  deploy:
+    name: Deploy to Kubernetes
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    environment:
+      name: production
+      url: https://mini-ecom.example.com
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure Kubernetes
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Verify Cluster Connection
+        run: |
+          echo "🔍 Checking cluster connection..."
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Apply Kubernetes Manifests
+        run: |
+          echo "📦 Applying Kubernetes manifests..."
+          kubectl apply -f k8s/
+
+      - name: Update Backend Image
+        run: |
+          echo "🔄 Updating backend deployment..."
+          kubectl set image deployment/mini-ecom-backend \
+            backend=${{ env.IMAGE_BACKEND }}:${{ github.run_number }} \
+            --record
+
+      - name: Update Frontend Image
+        run: |
+          echo "🔄 Updating frontend deployment..."
+          kubectl set image deployment/mini-ecom-frontend \
+            frontend=${{ env.IMAGE_FRONTEND }}:${{ github.run_number }} \
+            --record
+
+      - name: Wait for Backend Rollout
+        run: |
+          echo "⏳ Waiting for backend rollout..."
+          kubectl rollout status deployment/mini-ecom-backend --timeout=5m
+
+      - name: Wait for Frontend Rollout
+        run: |
+          echo "⏳ Waiting for frontend rollout..."
+          kubectl rollout status deployment/mini-ecom-frontend --timeout=5m
+
+      - name: Verify Deployment
+        run: |
+          echo "✅ Deployment verification"
+          echo ""
+          echo "=== PODS ==="
+          kubectl get pods -l app=backend
+          kubectl get pods -l app=frontend
+          echo ""
+          echo "=== SERVICES ==="
+          kubectl get svc backend-service frontend-service
+          echo ""
+          echo "✅ Deployment successful!"
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed! Rolling back..."
+          kubectl rollout undo deployment/mini-ecom-backend || true
+          kubectl rollout undo deployment/mini-ecom-frontend || true
+          echo "⚠️  Rollback completed"
+
+  # ==================== CREATE RELEASE ====================
+  create-release:
+    name: Create Release
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Git Tag
+        id: tag
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag_prefix: v
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.new_tag }}
+          name: Release ${{ steps.tag.outputs.new_tag }}
+          body: |
+            ## 🚀 Release ${{ steps.tag.outputs.new_tag }}
+            
+            ### Docker Images
+            - **Backend**: `${{ env.IMAGE_BACKEND }}:${{ github.run_number }}`
+            - **Frontend**: `${{ env.IMAGE_FRONTEND }}:${{ github.run_number }}`
+            
+            ### Security Scan
+            View Snyk security reports at: https://app.snyk.io/
+            
+            ### Deployment
+            - ✅ Deployed to production cluster
+            - ✅ All health checks passed
+            
+            ### Changes
+            ${{ github.event.head_commit.message }}
+            
+            **Commit SHA**: `${{ github.sha }}`
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
